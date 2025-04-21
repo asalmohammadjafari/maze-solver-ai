@@ -1,5 +1,4 @@
 import argparse
-from game import solve_maze
 from enum import Enum
 
 
@@ -7,6 +6,8 @@ class Algorithm(Enum):
     dfs = "DFS"
     bfs = "BFS"
     ids = "IDS"
+    ucs = "UCS"
+    gbfs = "GBFS"
     a_star = "A_Star"
     a_star_geometric = "ASG"
 
@@ -24,10 +25,10 @@ def main():
         "--algorithm",
         type=Algorithm,
         choices=list(Algorithm),
-        help="Algorithm must be: [DFS, BFS, IDS, A_Star, ASG]",
+        help="Algorithm must be: [DFS, BFS, IDS, UCS, GBFS, A_Star, ASG]",
     )
     parser.add_argument(
-        "-m", "--map", default=0, type=int, help="0, and 1 are the available maps"
+        "-m", "--map", default=0, type=int, help="Available bundled maps: 0-7"
     )
     parser.add_argument(
         "-s", "--start", default=None, type=str, help="Start position of the agent"
@@ -38,6 +39,8 @@ def main():
 
     args = parser.parse_args()
     if args.algorithm:
+        from game import solve_maze
+
         start = args.start.split(",") if args.start else None
         goal = args.goal.split(",") if args.goal else None
         start_pos = (int(start[0]), int(start[1])) if start else None

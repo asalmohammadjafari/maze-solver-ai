@@ -1,15 +1,50 @@
+import os
+import time
+
 import numpy as np
 import pygame
-import time
-import csv
 from Algorithm import (
     A_Star_Geometric_Algorithm,
     DFS_Algorithm,
     BFS_Algorithm,
     IDS_Algorithm,
+    Uniform_Cost_Search_Algorithm,
+    Greedy_Best_First_Algorithm,
     A_Star_Algorithm,
 )
-from time import sleep
+
+
+def _in_bounds(pos, num_rows, num_columns):
+    return 0 <= pos[0] < num_rows and 0 <= pos[1] < num_columns
+
+
+def _resolve_position(pos, grid):
+    """
+    Resolve CLI coordinates against grid indexing.
+
+    Primary convention is (row, col). For backward compatibility with historical
+    CLI usage, if that lands on a wall but swapped coordinates are open and in
+    bounds, fallback to swapped (col, row -> row, col).
+    """
+
+    num_rows, num_columns = grid.shape
+    direct = (int(pos[0]), int(pos[1]))
+    swapped = (int(pos[1]), int(pos[0]))
+
+    direct_in_bounds = _in_bounds(direct, num_rows, num_columns)
+    swapped_in_bounds = _in_bounds(swapped, num_rows, num_columns)
+
+    if direct_in_bounds and grid[*direct] != 0:
+        return direct, False
+
+    if swapped_in_bounds and grid[*swapped] != 0:
+        return swapped, swapped != direct
+
+    if direct_in_bounds:
+        return direct, False
+    if swapped_in_bounds:
+        return swapped, swapped != direct
+    raise IndexError
 
 
 def solve_maze(map_address, algorithm, start_pos=None, goal_pos=None):
@@ -21,6 +56,16 @@ def solve_maze(map_address, algorithm, start_pos=None, goal_pos=None):
     start_pos = (0, 0) if start_pos is None else start_pos
     goal_pos = (num_rows - 1, num_columns - 1) if goal_pos is None else goal_pos
     try:
+        start_pos, start_swapped = _resolve_position(start_pos, grid)
+        goal_pos, goal_swapped = _resolve_position(goal_pos, grid)
+        if start_swapped or goal_swapped:
+            print(
+                "Note: Interpreting coordinates using compatibility mode "
+                "(col,row -> row,col)."
+            )
+        if grid[*start_pos] == 0 or grid[*goal_pos] == 0:
+            print("Error: Start or goal position is blocked by a wall.")
+            return None
         grid[*start_pos] = 2
         grid[*goal_pos] = 3
     except IndexError:
@@ -50,13 +95,16 @@ def solve_maze(map_address, algorithm, start_pos=None, goal_pos=None):
 
     pygame.display.set_caption(f"{algorithm} Pathfinder. Solving: {map_address}")
 
+    headless_mode = os.environ.get("SDL_VIDEODRIVER") == "dummy"
     done = False
-    run = False
+    run = headless_mode
     close = False
+    start_t0 = time.time() if run else None
 
     clock = pygame.time.Clock()
 
     digital_twin = None
+    solution = []
 
     if algorithm == "BFS":
         digital_twin = BFS_Algorithm(
@@ -72,6 +120,14 @@ def solve_maze(map_address, algorithm, start_pos=None, goal_pos=None):
         )
     elif algorithm == "A_Star":
         digital_twin = A_Star_Algorithm(
+            start_pos=start_pos, goal_pos=goal_pos, grid_dim=grid_dim
+        )
+    elif algorithm == "UCS":
+        digital_twin = Uniform_Cost_Search_Algorithm(
+            start_pos=start_pos, goal_pos=goal_pos, grid_dim=grid_dim
+        )
+    elif algorithm == "GBFS":
+        digital_twin = Greedy_Best_First_Algorithm(
             start_pos=start_pos, goal_pos=goal_pos, grid_dim=grid_dim
         )
     elif algorithm == "ASG":
@@ -109,14 +165,15 @@ def solve_maze(map_address, algorithm, start_pos=None, goal_pos=None):
         clock.tick(60)
         pygame.display.flip()
 
-        if run == True:
+        if run:
             solution, done, grid = digital_twin.update(grid=grid)
 
-        if done == True:
+        if done:
             print(f"Total empty block numbers: {empty_block_count}")
             print(f"Explored block numbers: {np.count_nonzero(grid == 4)}")
             for pos in solution:
-                grid[pos[0], pos[1]] = 5
+                if pos not in (start_pos, goal_pos):
+                    grid[pos[0], pos[1]] = 5
 
             screen.fill(grey)
 
@@ -137,13 +194,18 @@ def solve_maze(map_address, algorithm, start_pos=None, goal_pos=None):
             clock.tick(60)
             pygame.display.flip()
 
-    print(f"Your maze solved with {algorithm} algorithm.")
-    print(f"--- finished {time.time()-start_t0:.3f} s---")
-    while not close:
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                close = True
+    if solution:
+        print(f"Your maze solved with {algorithm} algorithm.")
+    else:
+        print(f"No path found with {algorithm} algorithm.")
+    if start_t0 is not None:
+        print(f"--- finished {time.time()-start_t0:.3f} s---")
+    if not headless_mode:
+        while not close:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    close = True
 
-            elif event.type == pygame.KEYDOWN:
-                close = True
+                elif event.type == pygame.KEYDOWN:
+                    close = True
     pygame.quit()

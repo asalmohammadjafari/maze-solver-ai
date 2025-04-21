@@ -1,262 +1,265 @@
-from collections import deque
-from _helpers import Node, Stack, Queue, PriorityQueue
-import sys
+﻿from __future__ import annotations
+
 import heapq
+from collections import deque
+from math import inf
 
-sys.setrecursionlimit(10000)
 
-class BFS_Algorithm:
-    def __init__(self, start_pos, goal_pos, grid_dim):
+Position = tuple[int, int]
+
+
+class _SearchBase:
+    """Shared utilities for grid-based search algorithms."""
+
+    def __init__(self, start_pos: Position, goal_pos: Position, grid_dim: Position):
         self.start_pos = start_pos
         self.goal_pos = goal_pos
         self.grid_dim = grid_dim
-        self.queue = Queue()
-        self.queue.push(Node(pos=start_pos, parent=None))
 
-    def get_successors(self, x, y):
+    def get_successors(self, x: int, y: int) -> list[Position]:
         return [(x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)]
 
-    def is_valid_cell(self, pos):
+    def is_valid_cell(self, pos: Position) -> bool:
         return 0 <= pos[0] <= self.grid_dim[0] and 0 <= pos[1] <= self.grid_dim[1]
 
-    def backtrack_solution(self, curr_node):
-        return self._backtrack(curr_node)
+    def _is_walkable(self, grid, pos: Position) -> bool:
+        return self.is_valid_cell(pos) and grid[pos[0], pos[1]] in (1, 2, 3, 4, 5)
 
-    def _backtrack(self, curr_node):
-        return [] if curr_node.parent is None else self._backtrack(curr_node.parent) + [curr_node.position()]
+    def _mark_explored(self, grid, pos: Position) -> None:
+        if pos not in (self.start_pos, self.goal_pos) and grid[pos[0], pos[1]] == 1:
+            grid[pos[0], pos[1]] = 4
+
+    def _build_path(self, parent: dict[Position, Position | None], end: Position) -> list[Position]:
+        path: list[Position] = []
+        cursor: Position | None = end
+        while cursor is not None:
+            path.append(cursor)
+            cursor = parent[cursor]
+        path.reverse()
+        return path
+
+    def _start_equals_goal(self, grid):
+        if self.start_pos == self.goal_pos:
+            return [self.start_pos], True, grid
+        return None
+
+
+class BFS_Algorithm(_SearchBase):
+    def update(self, grid):
+        trivial = self._start_equals_goal(grid)
+        if trivial is not None:
+            return trivial
+
+        queue = deque([self.start_pos])
+        visited = {self.start_pos}
+        parent: dict[Position, Position | None] = {self.start_pos: None}
+
+        while queue:
+            current = queue.popleft()
+            if current == self.goal_pos:
+                return self._build_path(parent, current), True, grid
+
+            for successor in self.get_successors(*current):
+                if successor in visited or not self._is_walkable(grid, successor):
+                    continue
+                visited.add(successor)
+                parent[successor] = current
+                queue.append(successor)
+
+            self._mark_explored(grid, current)
+
+        return [], True, grid
+
+
+class DFS_Algorithm(_SearchBase):
+    def update(self, grid):
+        trivial = self._start_equals_goal(grid)
+        if trivial is not None:
+            return trivial
+
+        stack = [self.start_pos]
+        visited = {self.start_pos}
+        parent: dict[Position, Position | None] = {self.start_pos: None}
+
+        while stack:
+            current = stack.pop()
+            if current == self.goal_pos:
+                return self._build_path(parent, current), True, grid
+
+            # Reverse order keeps traversal deterministic with stack LIFO behavior.
+            for successor in reversed(self.get_successors(*current)):
+                if successor in visited or not self._is_walkable(grid, successor):
+                    continue
+                visited.add(successor)
+                parent[successor] = current
+                stack.append(successor)
+
+            self._mark_explored(grid, current)
+
+        return [], True, grid
+
+
+class IDS_Algorithm(_SearchBase):
+    def _depth_limited_search(self, grid, depth_limit: int):
+        explored: set[Position] = set()
+        best_remaining_depth: dict[Position, int] = {}
+
+        def dfs(node: Position, depth: int, active_path: set[Position]) -> list[Position] | None:
+            explored.add(node)
+            if node == self.goal_pos:
+                return [node]
+            if depth >= depth_limit:
+                return None
+
+            remaining_depth = depth_limit - depth
+            if best_remaining_depth.get(node, -1) >= remaining_depth:
+                return None
+            best_remaining_depth[node] = remaining_depth
+
+            for successor in self.get_successors(*node):
+                if not self._is_walkable(grid, successor) or successor in active_path:
+                    continue
+                active_path.add(successor)
+                suffix = dfs(successor, depth + 1, active_path)
+                if suffix is not None:
+                    return [node] + suffix
+                active_path.remove(successor)
+
+            return None
+
+        initial_path = {self.start_pos}
+        found_path = dfs(self.start_pos, depth=0, active_path=initial_path)
+        return found_path, explored
 
     def update(self, grid):
-        curr_state = self.queue.pop()
-        x, y = curr_state.position()
-        done = False
-        solution_path = []
+        trivial = self._start_equals_goal(grid)
+        if trivial is not None:
+            return trivial
 
-        for step in self.get_successors(x, y):
-            if self.is_valid_cell(step) and grid[step[0], step[1]] in [1, 3]:
-                self.queue.push(Node(pos=step, parent=curr_state))
+        max_depth = (self.grid_dim[0] + 1) * (self.grid_dim[1] + 1)
+        for depth_limit in range(max_depth + 1):
+            path, explored = self._depth_limited_search(grid, depth_limit)
+            for pos in explored:
+                self._mark_explored(grid, pos)
+            if path is not None:
+                return path, True, grid
 
-                if step == self.goal_pos:
-                    done = True
-                    solution_path = self.backtrack_solution(curr_state)
-                    break
-
-            grid[x, y] = 4
-
-        return solution_path, done, grid
+        return [], True, grid
 
 
-class DFS_Algorithm:
-    def __init__(self, start_pos, goal_pos, grid_dim):
-        self.start_pos = start_pos
-        self.goal_pos = goal_pos
-        self.grid_dim = grid_dim
-        self.stack = Stack()
-        self.stack.push(Node(pos=start_pos, parent=None))
-
-    def get_successors(self, x, y):
-        return [(x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)]
-
-    def is_valid_cell(self, pos):
-        return 0 <= pos[0] <= self.grid_dim[0] and 0 <= pos[1] <= self.grid_dim[1]
-
-    def backtrack_solution(self, curr_node):
-        return self._backtrack(curr_node)
-
-    def _backtrack(self, curr_node):
-        return [] if curr_node.parent is None else self._backtrack(curr_node.parent) + [curr_node.position()]
-
+class Uniform_Cost_Search_Algorithm(_SearchBase):
     def update(self, grid):
-        curr_state = self.stack.pop()
-        x, y = curr_state.position()
-        done = False
-        solution_path = []
+        trivial = self._start_equals_goal(grid)
+        if trivial is not None:
+            return trivial
 
-        for step in self.get_successors(x, y):
-            if self.is_valid_cell(step) and grid[step[0], step[1]] in [1, 3]:
-                self.stack.push(Node(pos=step, parent=curr_state))
+        parent: dict[Position, Position | None] = {self.start_pos: None}
+        best_cost: dict[Position, int] = {self.start_pos: 0}
+        open_heap: list[tuple[int, Position]] = [(0, self.start_pos)]
 
-                if step == self.goal_pos:
-                    done = True
-                    solution_path = self.backtrack_solution(curr_state)
-                    break
-
-            grid[x, y] = 4
-
-        return solution_path, done, grid
-
-
-class IDS_Algorithm:
-    def __init__(self, start_pos, goal_pos, grid_dim):
-        self.start_pos = start_pos
-        self.goal_pos = goal_pos
-        self.grid_dim = grid_dim
-        self.stack = Stack()
-        self.stack.push(Node(pos=start_pos, parent=None))
-        self.max_depth = 0
-
-    def get_successors(self, x, y):
-        return [(x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)]
-
-    def is_valid_cell(self, pos):
-        return 0 <= pos[0] <= self.grid_dim[0] and 0 <= pos[1] <= self.grid_dim[1]
-
-    def backtrack_solution(self, curr_node):
-        return self._backtrack(curr_node)
-
-    def _backtrack(self, curr_node):
-        return [] if curr_node.parent is None else self._backtrack(curr_node.parent) + [curr_node.position()]
-
-    def dls(self, grid, depth):
-        curr_state = self.stack.pop()
-        x, y = curr_state.position()
-        done = False
-        solution_path = []
-
-        for step in self.get_successors(x, y):
-            if self.max_depth < depth:
-                continue
-            elif self.is_valid_cell(step) and grid[step[0], step[1]] in [1, 3]:
-                self.stack.push(Node(pos=step, parent=curr_state))
-
-                if step == self.goal_pos:
-                    done = True
-                    solution_path = self.backtrack_solution(curr_state)
-                    break
-
-            grid[x, y] = 4
-        return solution_path, done, grid
-
-    def update(self, grid):
-        res = self.dls(grid, self.max_depth)
-        if res[1]:
-            return res
-        else:
-            self.max_depth += 1
-            return self.update(grid)
-
-
-class A_Star_Algorithm:
-    def __init__(self, start_pos, goal_pos, grid_dim):
-        self.start_pos = start_pos
-        self.goal_pos = goal_pos
-        self.grid_dim = grid_dim
-
-    def calculate_heuristic(self, pos):
-        return ((pos[0] - self.goal_pos[0]) ** 2 + (pos[1] - self.goal_pos[1]) ** 2) ** 0.5
-
-    def get_successors(self, x, y):
-        return [(x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1), (x + 1, y + 1), (x - 1, y - 1), (x + 1, y - 1),
-                (x - 1, y + 1)]
-
-    def is_valid_cell(self, pos):
-        return 0 <= pos[0] <= self.grid_dim[0] and 0 <= pos[1] <= self.grid_dim[1]
-
-    def backtrack_solution(self, curr_node):
-        return self._backtrack(curr_node)
-
-    def _backtrack(self, curr_node):
-        return [] if curr_node.parent is None else self._backtrack(curr_node.parent) + [curr_node.position()]
-
-    def find_lowest_cost(self, node_list):
-        best_node = node_list[0]
-        for node in node_list[1:]:
-            if node.cost < best_node.cost:
-                best_node = node
-
-        return best_node
-
-    def update(self, grid):
-        done = False
-        solution_path = []
-        open_list = []
-        start_node = Node(self.start_pos, parent=None, cost=0)
-        heapq.heappush(open_list, start_node)
-        closed_list = set()
-
-        while open_list:
-            q = heapq.heappop(open_list)
-
-            if q.position() in closed_list:
+        while open_heap:
+            cost_so_far, current = heapq.heappop(open_heap)
+            if cost_so_far > best_cost.get(current, inf):
                 continue
 
-            closed_list.add(q.position())
+            if current == self.goal_pos:
+                return self._build_path(parent, current), True, grid
 
-            if q.position() == self.goal_pos:
-                solution_path = self.backtrack_solution(q)
-                done = True
-                break
+            self._mark_explored(grid, current)
 
-            successors_h = sorted(
-                [(self.calculate_heuristic(step), step) for step in self.get_successors(*q.position())])
+            for successor in self.get_successors(*current):
+                if not self._is_walkable(grid, successor):
+                    continue
+                next_cost = cost_so_far + 1
+                if next_cost < best_cost.get(successor, inf):
+                    best_cost[successor] = next_cost
+                    parent[successor] = current
+                    heapq.heappush(open_heap, (next_cost, successor))
 
-            for successor in successors_h:
-                if self.is_valid_cell(successor[1]) and grid[successor[1][0], successor[1][1]] in [1, 3]:
-                    n = Node(successor[1], parent=q, cost=successor[0])
-                    heapq.heappush(open_list, n)
-            grid[*q.position()] = 4
-
-        return solution_path, done, grid
+        return [], True, grid
 
 
-class A_Star_Geometric_Algorithm:
-    def __init__(self, start_pos, goal_pos, grid_dim):
-        self.start_pos = start_pos
-        self.goal_pos = goal_pos
-        self.grid_dim = grid_dim
-
-    def calculate_heuristic(self, pos):
+class Greedy_Best_First_Algorithm(_SearchBase):
+    def calculate_heuristic(self, pos: Position) -> int:
         return abs(pos[0] - self.goal_pos[0]) + abs(pos[1] - self.goal_pos[1])
 
-    def get_successors(self, x, y):
-        return [(x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1), (x + 1, y + 1), (x - 1, y - 1), (x + 1, y - 1),
-                (x - 1, y + 1)]
+    def update(self, grid):
+        trivial = self._start_equals_goal(grid)
+        if trivial is not None:
+            return trivial
 
-    def is_valid_cell(self, pos):
-        return 0 <= pos[0] <= self.grid_dim[0] and 0 <= pos[1] <= self.grid_dim[1]
+        parent: dict[Position, Position | None] = {self.start_pos: None}
+        visited = {self.start_pos}
+        open_heap: list[tuple[int, Position]] = [
+            (self.calculate_heuristic(self.start_pos), self.start_pos)
+        ]
 
-    def backtrack_solution(self, curr_node):
-        return self._backtrack(curr_node)
+        while open_heap:
+            _, current = heapq.heappop(open_heap)
+            if current == self.goal_pos:
+                return self._build_path(parent, current), True, grid
 
-    def _backtrack(self, curr_node):
-        return [] if curr_node.parent is None else self._backtrack(curr_node.parent) + [curr_node.position()]
+            self._mark_explored(grid, current)
 
-    def find_lowest_cost(self, node_list):
-        best_node = node_list[0]
-        for node in node_list[1:]:
-            if node.cost < best_node.cost:
-                best_node = node
+            for successor in self.get_successors(*current):
+                if successor in visited or not self._is_walkable(grid, successor):
+                    continue
+                visited.add(successor)
+                parent[successor] = current
+                heapq.heappush(open_heap, (self.calculate_heuristic(successor), successor))
 
-        return best_node
+        return [], True, grid
+
+
+class A_Star_Algorithm(_SearchBase):
+    def calculate_heuristic(self, pos: Position) -> int:
+        return abs(pos[0] - self.goal_pos[0]) + abs(pos[1] - self.goal_pos[1])
 
     def update(self, grid):
-        done = False
-        solution_path = []
-        open_list = []
-        start_node = Node(self.start_pos, parent=None, cost=0)
-        heapq.heappush(open_list, start_node)
-        closed_list = set()
+        trivial = self._start_equals_goal(grid)
+        if trivial is not None:
+            return trivial
 
-        while open_list:
-            q = heapq.heappop(open_list)
+        parent: dict[Position, Position | None] = {self.start_pos: None}
+        g_cost: dict[Position, int] = {self.start_pos: 0}
+        open_heap: list[tuple[int, int, Position]] = [
+            (self.calculate_heuristic(self.start_pos), 0, self.start_pos)
+        ]
 
-            if q.position() in closed_list:
+        while open_heap:
+            _, cost_so_far, current = heapq.heappop(open_heap)
+            if cost_so_far > g_cost.get(current, inf):
                 continue
 
-            closed_list.add(q.position())
+            if current == self.goal_pos:
+                return self._build_path(parent, current), True, grid
 
-            if q.position() == self.goal_pos:
-                solution_path = self.backtrack_solution(q)
-                done = True
-                break
+            self._mark_explored(grid, current)
 
-            successors_h = sorted(
-                [(self.calculate_heuristic(step), step) for step in self.get_successors(*q.position())])
+            for successor in self.get_successors(*current):
+                if not self._is_walkable(grid, successor):
+                    continue
 
-            for successor in successors_h:
-                if self.is_valid_cell(successor[1]) and grid[successor[1][0], successor[1][1]] in [1, 3]:
-                    n = Node(successor[1], parent=q, cost=successor[0])
-                    heapq.heappush(open_list, n)
+                next_cost = cost_so_far + 1
+                if next_cost < g_cost.get(successor, inf):
+                    g_cost[successor] = next_cost
+                    parent[successor] = current
+                    next_f = next_cost + self.calculate_heuristic(successor)
+                    heapq.heappush(open_heap, (next_f, next_cost, successor))
 
-            grid[q.position()[0], q.position()[1]] = 4
+        return [], True, grid
 
-        return solution_path, done, grid
+
+class A_Star_Geometric_Algorithm(Greedy_Best_First_Algorithm):
+    """Backward-compatible alias for the original ASG option."""
+
+
+__all__ = [
+    "BFS_Algorithm",
+    "DFS_Algorithm",
+    "IDS_Algorithm",
+    "Uniform_Cost_Search_Algorithm",
+    "Greedy_Best_First_Algorithm",
+    "A_Star_Algorithm",
+    "A_Star_Geometric_Algorithm",
+]
